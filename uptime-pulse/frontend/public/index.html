@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UptimePulse — Мониторинг серверов</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 780px;
+      margin: 40px auto;
+      padding: 0 16px;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    h1 { margin: 0; font-size: 26px; }
+    .sub { color: #94a3b8; font-size: 14px; margin-top: 4px; }
+    form {
+      display: grid;
+      grid-template-columns: 1fr 1.4fr auto;
+      gap: 10px;
+      background: #1e293b;
+      padding: 14px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      border: 1px solid #334155;
+    }
+    @media (max-width: 640px) {
+      form { grid-template-columns: 1fr; }
+    }
+    input {
+      padding: 10px 12px;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #f8fafc;
+      font-size: 14px;
+    }
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      background: #3b82f6;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover { background: #2563eb; }
+    button.ghost {
+      background: #334155;
+      color: #e2e8f0;
+    }
+    button.ghost:hover { background: #475569; }
+    button.del {
+      background: #7f1d1d;
+      color: #fecaca;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+    button.del:hover { background: #991b1b; }
+    .list { display: flex; flex-direction: column; gap: 10px; }
+    .card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .name { font-weight: 600; font-size: 16px; }
+    .url { color: #94a3b8; font-size: 13px; word-break: break-all; }
+    .time { color: #64748b; font-size: 12px; }
+    .http-result { font-size: 12px; color: #94a3b8; }
+    .http-result.error { color: #f87171; }
+    .http-result.redirect { color: #fbbf24; }
+    .right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+    .ping { font-variant-numeric: tabular-nums; font-size: 13px; color: #cbd5e1; min-width: 58px; text-align: right; }
+    .badge {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+    .ONLINE { background: rgba(34, 197, 94, 0.18); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
+    .OFFLINE { background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .PENDING { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.4); }
+    .notice { display: none; padding: 10px 12px; margin: 0 0 16px; border-radius: 8px; font-size: 13px; }
+    .notice.error { display: block; background: rgba(239, 68, 68, .12); color: #fca5a5; border: 1px solid rgba(239, 68, 68, .35); }
+    button:disabled { opacity: .6; cursor: wait; }
+    @media (max-width: 520px) {
+      .top { align-items: flex-start; flex-direction: column; }
+      .card { align-items: flex-start; flex-direction: column; }
+      .right { width: 100%; justify-content: space-between; }
+    }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <h1>UptimePulse</h1>
+      <div class="sub">Мониторинг доступности сайтов и сервисов с замером задержки</div>
+    </div>
+    <button class="ghost" id="check-now">Проверить сейчас</button>
+  </div>
+
+  <div id="notice" class="notice" role="alert" aria-live="polite"></div>
+
+  <form id="target-form">
+    <input id="name-input" type="text" placeholder="Название (например, Proxmox)" />
+    <input id="url-input" type="text" placeholder="URL или домен (например, https://ya.ru)" required />
+    <button type="submit">Добавить</button>
+  </form>
+
+  <div class="list" id="targets-list"></div>
+
+  <script>
+    const API = "/api/targets";
+    const listEl = document.getElementById("targets-list");
+    const formEl = document.getElementById("target-form");
+    const nameEl = document.getElementById("name-input");
+    const urlEl = document.getElementById("url-input");
+    const checkBtn = document.getElementById("check-now");
+    const noticeEl = document.getElementById("notice");
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function showError(message) {
+      noticeEl.textContent = message;
+      noticeEl.className = "notice error";
+    }
+
+    function clearError() {
+      noticeEl.textContent = "";
+      noticeEl.className = "notice";
+    }
+
+    async function apiRequest(url, options = {}) {
+      const response = await fetch(url, options);
+      let payload;
+      try { payload = await response.json(); }
+      catch { throw new Error("Сервер вернул некорректный ответ."); }
+      if (!response.ok) throw new Error(payload.error || `Ошибка сервера (${response.status}).`);
+      return payload;
+    }
+
+    async function loadTargets() {
+      try {
+        const items = await apiRequest(API);
+        if (!Array.isArray(items)) throw new Error("Некорректный формат списка целей.");
+        if (!items.length) {
+          listEl.innerHTML = '<div class="card"><span class="url">Пока нет целей для мониторинга. Добавь первый URL выше.</span></div>';
+          return;
+        }
+        listEl.innerHTML = items.map(item => {
+          const status = ["ONLINE", "OFFLINE", "PENDING"].includes(item.status) ? item.status : "PENDING";
+          const latency = Number.isFinite(item.latency_ms) ? `${item.latency_ms} ms` : "—";
+          return `
+            <div class="card">
+              <div class="meta">
+                <div class="name">${escapeHtml(item.name)}</div>
+                <div class="url">${escapeHtml(item.url)}</div>
+                <div class="time">Последняя проверка: ${escapeHtml(item.last_checked || "—")}</div>
+                ${Number.isInteger(item.http_status) ? `<div class="http-result ${item.http_status >= 400 ? "error" : item.http_status >= 300 ? "redirect" : ""}">HTTP ${item.http_status}${item.http_status >= 500 ? " · ошибка сервера" : item.http_status >= 400 ? " · ошибка HTTP" : item.http_status >= 300 ? " · перенаправление" : item.http_success ? " · успешно" : " · информационный ответ"}</div>` : ""}
+              </div>
+              <div class="right">
+                <span class="ping">${latency}</span>
+                <span class="badge ${status}">${status}</span>
+                <button class="del" type="button" data-delete-id="${Number(item.id)}">Удалить</button>
+              </div>
+            </div>`;
+        }).join("");
+      } catch (error) {
+        showError(`Не удалось загрузить список: ${error.message}`);
+      }
+    }
+
+    listEl.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-delete-id]");
+      if (!button) return;
+      button.disabled = true;
+      try {
+        await apiRequest(`${API}/${encodeURIComponent(button.dataset.deleteId)}`, { method: "DELETE" });
+        clearError();
+        await loadTargets();
+      } catch (error) {
+        showError(`Не удалось удалить цель: ${error.message}`);
+        button.disabled = false;
+      }
+    });
+
+    formEl.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const name = nameEl.value.trim();
+      const url = urlEl.value.trim();
+      if (!url) { showError("Укажи URL для мониторинга."); return; }
+      const submitButton = formEl.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      try {
+        await apiRequest(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, url }),
+        });
+        nameEl.value = "";
+        urlEl.value = "";
+        clearError();
+        await loadTargets();
+      } catch (error) {
+        showError(`Не удалось добавить цель: ${error.message}`);
+      } finally {
+        submitButton.disabled = false;
+      }
+    });
+
+    checkBtn.addEventListener("click", async () => {
+      checkBtn.disabled = true;
+      checkBtn.textContent = "Проверяем...";
+      try {
+        await apiRequest(`${API}/check`, { method: "POST" });
+        clearError();
+        await loadTargets();
+      } catch (error) {
+        showError(`Проверка не выполнена: ${error.message}`);
+      } finally {
+        checkBtn.disabled = false;
+        checkBtn.textContent = "Проверить сейчас";
+      }
+    });
+
+    loadTargets();
+    setInterval(loadTargets, 10000);
+  </script>
+</body>
+</html>
